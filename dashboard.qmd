@@ -3,11 +3,11 @@ title: "Running Progress"
 date: now
 date-format: "MMMM D, YYYY h:mm A"
 format:
-  dashboard:
+  html:
     theme: darkly
-    orientation: rows
     self-contained: true
-    scrolling: true
+    toc: false
+    page-layout: full
 ---
 
 ```{python}
@@ -18,6 +18,7 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from pathlib import Path
+from IPython.display import HTML, display
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -41,6 +42,25 @@ STREAK_YELLOW = 1          # Month streak yellow threshold
 
 DATA_DIR = Path("data")
 STREAMS_DIR = DATA_DIR / "activity-streams"
+
+# Chart styling
+CHART_BG = "rgba(0,0,0,0)"
+GRID_COLOR = "rgba(255,255,255,0.08)"
+CHART_HEIGHT = 450
+CHART_MARGIN = dict(t=30, b=50, l=60, r=30)
+
+def chart_layout(**kwargs):
+    """Base layout kwargs shared by all charts."""
+    base = dict(
+        template="plotly_dark",
+        height=CHART_HEIGHT,
+        paper_bgcolor=CHART_BG,
+        plot_bgcolor=CHART_BG,
+        margin=CHART_MARGIN,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    base.update(kwargs)
+    return base
 
 # ── Helpers ──────────────────────────────────────────────────────
 
@@ -67,22 +87,22 @@ def format_pace(minutes):
         s = 0
     return f"{m}:{s:02d}"
 
-def traffic_light(value, green_thresh, yellow_thresh, lower_is_better=False):
-    """Return Quarto valuebox color string."""
+def traffic_light_color(value, green_thresh, yellow_thresh, lower_is_better=False):
+    """Return hex color for scorecard."""
     if pd.isna(value):
-        return "secondary"
+        return "#6c757d"
     if lower_is_better:
         if value <= green_thresh:
-            return "success"
+            return "#198754"
         elif value <= yellow_thresh:
-            return "warning"
-        return "danger"
+            return "#ffc107"
+        return "#dc3545"
     else:
         if value >= green_thresh:
-            return "success"
+            return "#198754"
         elif value >= yellow_thresh:
-            return "warning"
-        return "danger"
+            return "#ffc107"
+        return "#dc3545"
 
 # ── Load Data ────────────────────────────────────────────────────
 
@@ -96,9 +116,6 @@ soccer["date"] = pd.to_datetime(soccer["date"])
 soccer["month"] = soccer["date"].dt.to_period("M")
 
 # ── Zone 2 Pace Calculation ─────────────────────────────────────
-# Stream-based (precise): filter per-second data to zone 2 HR, average pace.
-# Estimate (fallback): for runs without streams where avg HR is in zone 2,
-# use avg_pace_per_mile as a proxy.
 
 z2_records = []
 stream_files = sorted(STREAMS_DIR.glob("*.csv")) if STREAMS_DIR.exists() else []
@@ -166,7 +183,7 @@ run_monthly = (
 )
 soccer_monthly = soccer.groupby("month").size().reindex(all_months, fill_value=0)
 
-# ── Month Streak (consecutive months >= MIN_MONTHLY_MILES) ──────
+# ── Month Streak ─────────────────────────────────────────────────
 
 streak = 0
 for m in reversed(all_months):
@@ -235,43 +252,42 @@ else:
     recent_z2 = np.nan
 ```
 
-## Row
-
 ```{python}
-#| content: valuebox
-#| title: "30-Day Mileage"
-dict(
-    icon="speedometer2",
-    color=traffic_light(current_30d, MILEAGE_GREEN, MILEAGE_YELLOW),
-    value=f"{current_30d:.1f} mi",
+#| echo: false
+
+# ── 10K Readiness Scorecard ──────────────────────────────────────
+
+c1 = traffic_light_color(current_30d, MILEAGE_GREEN, MILEAGE_YELLOW)
+c2 = traffic_light_color(recent_z2, PACE_GREEN, PACE_YELLOW, lower_is_better=True)
+c3 = traffic_light_color(streak, STREAK_GREEN, STREAK_YELLOW)
+
+card = (
+    "flex:1; padding:24px 16px; border-radius:10px; text-align:center;"
+    "color:white; min-width:180px;"
 )
+label = "font-size:0.85em; opacity:0.85; margin-bottom:6px;"
+value = "font-size:2.2em; font-weight:700; line-height:1.1;"
+
+display(HTML(
+    f'<div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:32px;">'
+    f'<div style="{card} background:{c1};">'
+    f'<div style="{label}">30-Day Mileage</div>'
+    f'<div style="{value}">{current_30d:.1f} mi</div></div>'
+    f'<div style="{card} background:{c2};">'
+    f'<div style="{label}">Zone 2 Pace (last 3 runs)</div>'
+    f'<div style="{value}">{format_pace(recent_z2)} /mi</div></div>'
+    f'<div style="{card} background:{c3};">'
+    f'<div style="{label}">Month Streak (≥{MIN_MONTHLY_MILES} mi)</div>'
+    f'<div style="{value}">{streak} mo</div></div>'
+    f'</div>'
+))
 ```
 
-```{python}
-#| content: valuebox
-#| title: "Zone 2 Pace (last 3 runs)"
-dict(
-    icon="heart-pulse",
-    color=traffic_light(recent_z2, PACE_GREEN, PACE_YELLOW, lower_is_better=True),
-    value=format_pace(recent_z2) + " /mi",
-)
-```
+## Zone 2 Pace Efficiency
 
 ```{python}
-#| content: valuebox
-#| title: "Month Streak (≥25 mi)"
-dict(
-    icon="calendar-check",
-    color=traffic_light(streak, STREAK_GREEN, STREAK_YELLOW),
-    value=f"{streak} mo",
-)
-```
+#| echo: false
 
-## Row
-
-### Zone 2 Pace Efficiency
-
-```{python}
 fig = go.Figure()
 
 if not z2_df.empty:
@@ -283,7 +299,7 @@ if not z2_df.empty:
             x=estimates["date"], y=estimates["z2_pace"],
             mode="markers",
             name="Estimated (avg HR in zone 2)",
-            marker=dict(size=6, color="rgba(255,255,255,0.25)"),
+            marker=dict(size=7, color="rgba(255,255,255,0.3)"),
             text=estimates["z2_pace"].apply(format_pace),
             hovertemplate="%{x|%b %d, %Y}<br>Pace: %{text}<extra></extra>",
         ))
@@ -293,7 +309,7 @@ if not z2_df.empty:
             x=streams_pts["date"], y=streams_pts["z2_pace"],
             mode="markers",
             name="Stream-based (precise)",
-            marker=dict(size=9, color="#00d4aa", symbol="diamond"),
+            marker=dict(size=10, color="#00d4aa", symbol="diamond"),
             text=streams_pts["z2_pace"].apply(format_pace),
             hovertemplate="%{x|%b %d, %Y}<br>Pace: %{text}<extra></extra>",
         ))
@@ -305,7 +321,7 @@ if not z2_df.empty:
             mode="lines+markers",
             name="Monthly average",
             line=dict(color="#00d4aa", width=3),
-            marker=dict(size=11),
+            marker=dict(size=12),
             text=[format_pace(p) for p in z2_monthly.values],
             hovertemplate="%{x|%b %Y}<br>Avg: %{text}<extra></extra>",
         ))
@@ -316,37 +332,31 @@ if not z2_df.empty:
 else:
     y_lo, y_hi = 8, 18
 
-fig.update_layout(
-    template="plotly_dark",
-    height=450,
-    paper_bgcolor="rgba(0,0,0,0)",
-    plot_bgcolor="rgba(0,0,0,0)",
+fig.update_layout(**chart_layout(
+    height=500,
     yaxis=dict(
         title="Pace (min/mi)",
         autorange="reversed",
         tickvals=list(range(y_lo, y_hi + 1)),
         ticktext=[f"{m}:00" for m in range(y_lo, y_hi + 1)],
-        gridcolor="rgba(255,255,255,0.08)",
+        gridcolor=GRID_COLOR,
     ),
-    xaxis=dict(gridcolor="rgba(255,255,255,0.08)"),
-    xaxis_title="",
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-    margin=dict(t=40, b=50, l=60, r=20),
+    xaxis=dict(gridcolor=GRID_COLOR),
     hovermode="closest",
     annotations=[dict(
-        text="Faster is up. Dots = individual runs, line = monthly average.",
-        xref="paper", yref="paper", x=0.01, y=0.01,
-        showarrow=False, font=dict(size=11, color="rgba(255,255,255,0.35)"),
+        text="↑ Faster is up. Dots = individual runs, line = monthly average.",
+        xref="paper", yref="paper", x=0, y=-0.08,
+        showarrow=False, font=dict(size=12, color="rgba(255,255,255,0.4)"),
     )],
-)
-fig
+))
+fig.show()
 ```
 
-## Row
-
-### Monthly Volume + Consistency
+## Monthly Volume + Consistency
 
 ```{python}
+#| echo: false
+
 fig = make_subplots(specs=[[{"secondary_y": True}]])
 
 month_labels = [m.start_time.strftime("%b '%y") for m in all_months]
@@ -379,7 +389,7 @@ fig.add_trace(
         x=month_labels, y=soccer_monthly.values,
         mode="lines+markers", name="Soccer sessions",
         line=dict(color="orange", width=2),
-        marker=dict(size=5, color="orange"),
+        marker=dict(size=6, color="orange"),
         hovertemplate="%{x}<br>%{y} sessions<extra></extra>",
     ),
     secondary_y=True,
@@ -405,27 +415,23 @@ if streak > 0:
         y=max(run_monthly.values) * 1.08,
         text=f"{streak}-month streak",
         showarrow=False,
-        font=dict(size=12, color="#4dabf7", weight="bold"),
+        font=dict(size=13, color="#4dabf7"),
     )
 
-fig.update_layout(
-    template="plotly_dark",
-    height=400,
-    paper_bgcolor="rgba(0,0,0,0)",
-    plot_bgcolor="rgba(0,0,0,0)",
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-    margin=dict(t=40, b=60),
-    xaxis=dict(tickangle=-45, gridcolor="rgba(255,255,255,0.08)"),
+fig.update_layout(**chart_layout(
+    xaxis=dict(tickangle=-45, gridcolor=GRID_COLOR),
     hovermode="x",
-)
-fig.update_yaxes(title_text="Miles", secondary_y=False, gridcolor="rgba(255,255,255,0.08)")
+))
+fig.update_yaxes(title_text="Miles", secondary_y=False, gridcolor=GRID_COLOR)
 fig.update_yaxes(title_text="Sessions", secondary_y=True, showgrid=False)
-fig
+fig.show()
 ```
 
-### Rolling Mileage
+## Rolling Mileage
 
 ```{python}
+#| echo: false
+
 fig = go.Figure()
 
 fig.add_trace(go.Scatter(
@@ -455,30 +461,24 @@ for seg_id in changes.unique():
         line_width=0, layer="below",
     )
 
-fig.update_layout(
-    template="plotly_dark",
-    height=400,
-    paper_bgcolor="rgba(0,0,0,0)",
-    plot_bgcolor="rgba(0,0,0,0)",
-    yaxis=dict(title="Miles", gridcolor="rgba(255,255,255,0.08)"),
-    xaxis=dict(gridcolor="rgba(255,255,255,0.08)"),
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-    margin=dict(t=40, b=60),
+fig.update_layout(**chart_layout(
+    yaxis=dict(title="Miles", gridcolor=GRID_COLOR),
+    xaxis=dict(gridcolor=GRID_COLOR),
     hovermode="x unified",
     annotations=[dict(
         text="Green = building (30d > 90d). Red = declining.",
-        xref="paper", yref="paper", x=0.5, y=-0.15,
-        showarrow=False, font=dict(size=11, color="rgba(255,255,255,0.35)"),
+        xref="paper", yref="paper", x=0.5, y=-0.1,
+        showarrow=False, font=dict(size=12, color="rgba(255,255,255,0.4)"),
     )],
-)
-fig
+))
+fig.show()
 ```
 
-## Row
-
-### Cardiac Drift Analysis
+## Cardiac Drift Analysis
 
 ```{python}
+#| echo: false
+
 fig = go.Figure()
 
 if not drift_df.empty:
@@ -508,21 +508,15 @@ else:
         showarrow=False, font=dict(size=14, color="rgba(255,255,255,0.5)"),
     )
 
-fig.update_layout(
-    template="plotly_dark",
-    height=400,
-    paper_bgcolor="rgba(0,0,0,0)",
-    plot_bgcolor="rgba(0,0,0,0)",
-    yaxis=dict(title="Drift %", gridcolor="rgba(255,255,255,0.08)"),
-    xaxis=dict(gridcolor="rgba(255,255,255,0.08)"),
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-    margin=dict(t=40, b=60),
+fig.update_layout(**chart_layout(
+    yaxis=dict(title="Drift %", gridcolor=GRID_COLOR),
+    xaxis=dict(gridcolor=GRID_COLOR),
     hovermode="closest",
     annotations=[dict(
-        text="Drift = (2nd-half HR - 1st-half HR) / 1st-half HR. Lower = better aerobic fitness.",
-        xref="paper", yref="paper", x=0.5, y=-0.15,
-        showarrow=False, font=dict(size=11, color="rgba(255,255,255,0.35)"),
+        text="Drift = (2nd-half HR − 1st-half HR) / 1st-half HR. Lower = better aerobic fitness.",
+        xref="paper", yref="paper", x=0.5, y=-0.1,
+        showarrow=False, font=dict(size=12, color="rgba(255,255,255,0.4)"),
     )],
-)
-fig
+))
+fig.show()
 ```
