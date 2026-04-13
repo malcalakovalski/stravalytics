@@ -337,6 +337,8 @@ def main():
         if i % 25 == 0:
             print(f"  {i}/{len(runs)} processed")
 
+    # Filter out junk runs (accidental starts, < 0.5 mi)
+    run_data = [r for r in run_data if r["distance_miles"] >= 0.5]
     run_data.sort(key=lambda r: r["date"], reverse=True)
 
     # Build fieldnames: base columns + however many HR zone columns exist
@@ -351,8 +353,11 @@ def main():
     zone_fields = [f"hr_zone_{z}_sec" for z in range(1, zone_count + 1)]
     run_fields = base_fields + zone_fields + ["activity_id"]
 
-    n = write_csv("strava_runs_summary.csv", run_data, run_fields)
-    print(f"Wrote strava_runs_summary.csv ({n} rows)")
+    data_dir = Path("data")
+    data_dir.mkdir(exist_ok=True)
+
+    n = write_csv(data_dir / "strava-runs-summary.csv", run_data, run_fields)
+    print(f"Wrote data/strava-runs-summary.csv ({n} rows)")
 
     # ── Process soccer (summary + calories from detail endpoint) ────
     if soccer:
@@ -368,15 +373,15 @@ def main():
             soccer_data.append(soccer_row(activity, detail))
 
         soccer_data.sort(key=lambda r: r["date"], reverse=True)
-        n = write_csv("strava_soccer_summary.csv", soccer_data)
-        print(f"Wrote strava_soccer_summary.csv ({n} rows)")
+        n = write_csv(data_dir / "strava-soccer-summary.csv", soccer_data)
+        print(f"Wrote data/strava-soccer-summary.csv ({n} rows)")
     else:
         soccer_data = []
 
     # ── Fetch streams for most recent runs ──────────────────────────
     recent = sorted(runs, key=lambda a: a["start_date_local"], reverse=True)[:STREAM_COUNT]
     if recent:
-        streams_dir = Path("activity_streams")
+        streams_dir = data_dir / "activity-streams"
         streams_dir.mkdir(exist_ok=True)
         print(f"\nFetching streams for {len(recent)} most recent runs...")
 
@@ -393,7 +398,7 @@ def main():
 
             rows = stream_rows(data)
             if rows:
-                fname = f"{date_str}_{activity['id']}.csv"
+                fname = f"{date_str}-{activity['id']}.csv"
                 write_csv(streams_dir / fname, rows)
                 print(f"  [{i}/{len(recent)}] {fname} ({len(rows)} points)")
             else:

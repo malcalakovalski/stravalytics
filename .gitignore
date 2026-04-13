@@ -2,11 +2,6 @@
 .env
 strava_tokens.json
 
-# Output data (contains personal activity data)
-strava_runs_summary.csv
-strava_soccer_summary.csv
-activity_streams/
-
 # Python
 __pycache__/
 *.pyc
