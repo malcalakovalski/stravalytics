@@ -182,6 +182,30 @@ run_monthly = (
     runs.groupby("month")["distance_miles"].sum().reindex(all_months, fill_value=0)
 )
 soccer_monthly = soccer.groupby("month").size().reindex(all_months, fill_value=0)
+month_labels = [m.start_time.strftime("%b '%y") for m in all_months]
+
+# ── Training Intensity ───────────────────────────────────────────
+
+zone_cols = sorted([c for c in runs.columns if c.startswith("hr_zone_") and c.endswith("_sec")])
+zone_runs = runs[runs[zone_cols].sum(axis=1) > 0]
+zone_monthly_secs = zone_runs.groupby("month")[zone_cols].sum().reindex(all_months, fill_value=0)
+zone_totals = zone_monthly_secs.sum(axis=1)
+zone_pct = zone_monthly_secs.div(zone_totals.replace(0, np.nan), axis=0) * 100
+zone_pct = zone_pct.fillna(0)
+
+# ── Aerobic Efficiency ───────────────────────────────────────────
+
+ef_mask = (
+    runs["avg_heartrate"].notna()
+    & (runs["avg_heartrate"] > 0)
+    & (runs["duration_seconds"] > 0)
+    & (runs["distance_miles"] >= 1.0)
+)
+ef_runs = runs[ef_mask].copy()
+ef_runs["speed_mph"] = ef_runs["distance_miles"] / (ef_runs["duration_seconds"] / 3600)
+ef_runs["ef"] = ef_runs["speed_mph"] / ef_runs["avg_heartrate"] * 100
+ef_runs = ef_runs[(ef_runs["ef"] > 1) & (ef_runs["ef"] < 10)]
+ef_monthly = ef_runs.groupby("month")["ef"].mean()
 
 # ── Month Streak ─────────────────────────────────────────────────
 
@@ -359,8 +383,6 @@ fig.show()
 
 fig = make_subplots(specs=[[{"secondary_y": True}]])
 
-month_labels = [m.start_time.strftime("%b '%y") for m in all_months]
-
 streak_start_idx = max(0, len(all_months) - streak) if streak > 0 else len(all_months)
 bar_colors = []
 for i, m in enumerate(all_months):
@@ -515,6 +537,166 @@ fig.update_layout(**chart_layout(
     annotations=[dict(
         text="Drift = (2nd-half HR − 1st-half HR) / 1st-half HR. Lower = better aerobic fitness.",
         xref="paper", yref="paper", x=0.5, y=-0.1,
+        showarrow=False, font=dict(size=12, color="rgba(255,255,255,0.4)"),
+    )],
+))
+fig.show()
+```
+
+## Training Intensity Distribution
+
+```{python}
+#| echo: false
+
+zone_names = ["Zone 1 (Recovery)", "Zone 2 (Aerobic)", "Zone 3 (Tempo)",
+              "Zone 4 (Threshold)", "Zone 5 (VO2max)"]
+zone_colors = ["#00d4aa", "#4dabf7", "#ffc107", "#ff6b6b", "#dc3545"]
+
+fig = go.Figure()
+
+for i, col in enumerate(zone_cols):
+    fig.add_trace(go.Scatter(
+        x=month_labels, y=zone_pct[col].values,
+        mode="lines",
+        name=zone_names[i] if i < len(zone_names) else f"Zone {i+1}",
+        stackgroup="zones",
+        line=dict(width=0.5, color=zone_colors[i]),
+        fillcolor=zone_colors[i],
+        hovertemplate="%{x}<br>" + zone_names[i] + ": %{y:.0f}%<extra></extra>",
+    ))
+
+fig.add_hline(
+    y=80, line_dash="dash", line_color="rgba(255,255,255,0.4)",
+    annotation_text="80% easy target",
+    annotation_position="top right",
+)
+
+fig.update_layout(**chart_layout(
+    yaxis=dict(title="% of Training Time", range=[0, 100], gridcolor=GRID_COLOR),
+    xaxis=dict(tickangle=-45, gridcolor=GRID_COLOR),
+    hovermode="x",
+    annotations=[dict(
+        text="80/20 rule: aim for 80%+ in zones 1-2. Zone 3 ('gray zone') is the least productive.",
+        xref="paper", yref="paper", x=0.5, y=-0.12,
+        showarrow=False, font=dict(size=12, color="rgba(255,255,255,0.4)"),
+    )],
+))
+fig.show()
+```
+
+## Aerobic Efficiency Factor
+
+```{python}
+#| echo: false
+
+fig = go.Figure()
+
+if not ef_runs.empty:
+    fig.add_trace(go.Scatter(
+        x=ef_runs["date"], y=ef_runs["ef"],
+        mode="markers", name="Per-run EF",
+        marker=dict(size=7, color="rgba(255,255,255,0.3)"),
+        hovertemplate="%{x|%b %d, %Y}<br>EF: %{y:.2f}<extra></extra>",
+    ))
+
+    ef_monthly_clean = ef_monthly.dropna()
+    if not ef_monthly_clean.empty:
+        monthly_x = ef_monthly_clean.index.to_timestamp() + pd.Timedelta(days=15)
+        fig.add_trace(go.Scatter(
+            x=monthly_x, y=ef_monthly_clean.values,
+            mode="lines+markers", name="Monthly average",
+            line=dict(color="#4dabf7", width=3),
+            marker=dict(size=12),
+            hovertemplate="%{x|%b %Y}<br>Avg EF: %{y:.2f}<extra></extra>",
+        ))
+
+fig.update_layout(**chart_layout(
+    yaxis=dict(title="EF (speed / HR × 100)", gridcolor=GRID_COLOR),
+    xaxis=dict(gridcolor=GRID_COLOR),
+    hovermode="closest",
+    annotations=[dict(
+        text="EF = speed (mph) / avg HR × 100. Higher = more efficient. Rising EF = improving fitness.",
+        xref="paper", yref="paper", x=0.5, y=-0.1,
+        showarrow=False, font=dict(size=12, color="rgba(255,255,255,0.4)"),
+    )],
+))
+fig.show()
+```
+
+## Run Frequency
+
+```{python}
+#| echo: false
+
+day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+cal_start = daily["date"].iloc[0]
+
+daily_cal = daily.copy()
+daily_cal["dow"] = daily_cal["date"].dt.dayofweek
+daily_cal["week"] = ((daily_cal["date"] - cal_start).dt.days) // 7
+
+n_weeks = int(daily_cal["week"].max()) + 1
+grid = np.zeros((7, n_weeks))
+text_grid = np.full((7, n_weeks), "", dtype=object)
+
+for _, r in daily_cal.iterrows():
+    w, d = int(r["week"]), int(r["dow"])
+    grid[d, w] = r["miles"]
+    text_grid[d, w] = r["date"].strftime("%b %d, %Y")
+
+# Month tick positions
+month_ticks, month_tick_labels = [], []
+for m in pd.period_range(daily["date"].dt.to_period("M").iloc[0],
+                         daily["date"].dt.to_period("M").iloc[-1], freq="M"):
+    ts = m.to_timestamp()
+    if ts >= cal_start:
+        month_ticks.append((ts - cal_start).days // 7)
+        month_tick_labels.append(ts.strftime("%b '%y"))
+
+fig = go.Figure()
+
+fig.add_trace(go.Heatmap(
+    z=grid,
+    x=list(range(n_weeks)),
+    y=day_labels,
+    text=text_grid,
+    colorscale=[
+        [0, "#161b22"],
+        [0.05, "#0e4429"],
+        [0.3, "#006d32"],
+        [0.6, "#26a641"],
+        [1.0, "#39d353"],
+    ],
+    zmin=0,
+    zmax=max(daily["miles"].max(), 1),
+    xgap=3, ygap=3,
+    hovertemplate="%{text}<br>%{z:.1f} miles<extra></extra>",
+    colorbar=dict(title="Miles", len=0.6, thickness=12),
+))
+
+# Soccer overlay (orange circles)
+soccer_dates = set(soccer["date"].dt.date)
+sx = [int(r["week"]) for _, r in daily_cal.iterrows() if r["date"].date() in soccer_dates]
+sy = [day_labels[int(r["dow"])] for _, r in daily_cal.iterrows() if r["date"].date() in soccer_dates]
+
+if sx:
+    fig.add_trace(go.Scatter(
+        x=sx, y=sy,
+        mode="markers", name="Soccer",
+        marker=dict(size=9, color="orange", symbol="circle-open",
+                    line=dict(width=2, color="orange")),
+        hovertemplate="Soccer<extra></extra>",
+    ))
+
+fig.update_layout(**chart_layout(
+    height=280,
+    xaxis=dict(tickvals=month_ticks, ticktext=month_tick_labels,
+               tickangle=-45, showgrid=False),
+    yaxis=dict(autorange="reversed", showgrid=False),
+    hovermode="closest",
+    annotations=[dict(
+        text="Green = running (brighter = more miles). Orange circles = soccer.",
+        xref="paper", yref="paper", x=0.5, y=-0.18,
         showarrow=False, font=dict(size=12, color="rgba(255,255,255,0.4)"),
     )],
 ))
