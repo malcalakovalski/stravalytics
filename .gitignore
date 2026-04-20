@@ -11,3 +11,4 @@ __pycache__/
 dashboard.html
 dashboard_files/
 *_files/
+_site/

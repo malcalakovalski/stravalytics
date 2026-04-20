@@ -250,6 +250,7 @@ def soccer_row(activity, detail=None):
         "avg_heartrate": activity.get("average_heartrate", ""),
         "max_heartrate": activity.get("max_heartrate", ""),
         "calories": calories,
+        "activity_id": activity["id"],
     }
 
 
@@ -295,6 +296,37 @@ def write_csv(path, rows, fieldnames=None):
     return len(rows)
 
 
+# ── Incremental Helpers ─────────────────────────────────────────────
+
+
+def _latest_activity_ts(*csv_paths):
+    """Find the most recent activity date across CSV files, return as unix timestamp."""
+    latest = None
+    for path in csv_paths:
+        if not path.exists():
+            continue
+        with open(path) as f:
+            for row in csv.DictReader(f):
+                try:
+                    dt = datetime.strptime(row["date"], "%Y-%m-%d %H:%M")
+                    if latest is None or dt > latest:
+                        latest = dt
+                except (KeyError, ValueError):
+                    continue
+    if latest is None:
+        return 0
+    # 1-hour buffer to catch activities near the boundary
+    return int((latest - timedelta(hours=1)).timestamp())
+
+
+def _read_csv_rows(path):
+    """Read a CSV file and return list of dicts."""
+    if not path.exists():
+        return []
+    with open(path) as f:
+        return list(csv.DictReader(f))
+
+
 # ── Main ────────────────────────────────────────────────────────────
 
 
@@ -310,12 +342,26 @@ def main():
     token = get_token()
     print("Authenticated.\n")
 
-    # Fetch all activities (no date cutoff)
-    print("Fetching all activities...")
-    all_activities = fetch_all_activities(token, 0)
+    data_dir = Path("data")
+    data_dir.mkdir(exist_ok=True)
+    runs_path = data_dir / "strava-runs-summary.csv"
+    soccer_path = data_dir / "strava-soccer-summary.csv"
+
+    # Determine fetch window (incremental by default)
+    full_refresh = "--full" in sys.argv
+    after_ts = 0 if full_refresh else _latest_activity_ts(runs_path, soccer_path)
+
+    if after_ts > 0:
+        since = datetime.fromtimestamp(after_ts).strftime("%Y-%m-%d")
+        print(f"Fetching activities since {since}...")
+        print("  (Use --full to re-fetch everything)\n")
+    else:
+        print("Fetching all activities...")
+
+    all_activities = fetch_all_activities(token, after_ts)
     runs = [a for a in all_activities if a.get("type") == "Run"]
     soccer = [a for a in all_activities if a.get("type") in ("Soccer", "Football")]
-    print(f"Found {len(all_activities)} activities total: {len(runs)} runs, {len(soccer)} soccer\n")
+    print(f"Found {len(all_activities)} activities: {len(runs)} runs, {len(soccer)} soccer\n")
 
     # ── Process runs (summary + HR zones) ───────────────────────────
     print("Processing runs...")
@@ -335,6 +381,18 @@ def main():
 
     # Filter out junk runs (accidental starts, < 0.5 mi)
     run_data = [r for r in run_data if r["distance_miles"] >= 0.5]
+
+    # Merge with existing data (incremental mode)
+    if after_ts > 0:
+        existing = _read_csv_rows(runs_path)
+        existing_ids = {r.get("activity_id") for r in existing}
+        new_runs = [r for r in run_data if str(r["activity_id"]) not in existing_ids]
+        if new_runs:
+            print(f"  {len(new_runs)} new runs added to {len(existing)} existing")
+        else:
+            print(f"  No new runs (all {len(existing)} already exported)")
+        run_data = existing + new_runs
+
     run_data.sort(key=lambda r: r["date"], reverse=True)
 
     # Build fieldnames: base columns + however many HR zone columns exist
@@ -349,10 +407,7 @@ def main():
     zone_fields = [f"hr_zone_{z}_sec" for z in range(1, zone_count + 1)]
     run_fields = base_fields + zone_fields + ["activity_id"]
 
-    data_dir = Path("data")
-    data_dir.mkdir(exist_ok=True)
-
-    n = write_csv(data_dir / "strava-runs-summary.csv", run_data, run_fields)
+    n = write_csv(runs_path, run_data, run_fields)
     print(f"Wrote data/strava-runs-summary.csv ({n} rows)")
 
     # ── Process soccer (summary + calories from detail endpoint) ────
@@ -368,11 +423,29 @@ def main():
                 pass
             soccer_data.append(soccer_row(activity, detail))
 
+        # Merge with existing data (incremental mode)
+        if after_ts > 0:
+            existing = _read_csv_rows(soccer_path)
+            # Fall back to date-based dedup if existing CSV lacks activity_id
+            if existing and "activity_id" in existing[0]:
+                existing_ids = {r["activity_id"] for r in existing}
+                new_soccer = [r for r in soccer_data if str(r["activity_id"]) not in existing_ids]
+            else:
+                existing_dates = {r["date"] for r in existing}
+                new_soccer = [r for r in soccer_data if r["date"] not in existing_dates]
+            if new_soccer:
+                print(f"  {len(new_soccer)} new soccer activities")
+            soccer_data = existing + new_soccer
+
         soccer_data.sort(key=lambda r: r["date"], reverse=True)
-        n = write_csv(data_dir / "strava-soccer-summary.csv", soccer_data)
+        n = write_csv(soccer_path, soccer_data)
         print(f"Wrote data/strava-soccer-summary.csv ({n} rows)")
     else:
-        soccer_data = []
+        # In incremental mode, load existing soccer data even if no new activities
+        if after_ts > 0:
+            soccer_data = _read_csv_rows(soccer_path)
+        else:
+            soccer_data = []
 
     # ── Fetch streams for most recent runs ──────────────────────────
     recent = sorted(runs, key=lambda a: a["start_date_local"], reverse=True)[:STREAM_COUNT]
@@ -383,6 +456,10 @@ def main():
 
         for i, activity in enumerate(recent, 1):
             date_str = parse_date(activity["start_date_local"]).strftime("%Y-%m-%d")
+            fname = f"{date_str}-{activity['id']}.csv"
+            if (streams_dir / fname).exists():
+                print(f"  [{i}/{len(recent)}] {fname} (cached)")
+                continue
             try:
                 data = api_get(token, f"activities/{activity['id']}/streams", {
                     "keys": "time,distance,velocity_smooth,heartrate,altitude",
@@ -394,7 +471,6 @@ def main():
 
             rows = stream_rows(data)
             if rows:
-                fname = f"{date_str}-{activity['id']}.csv"
                 write_csv(streams_dir / fname, rows)
                 print(f"  [{i}/{len(recent)}] {fname} ({len(rows)} points)")
             else:
@@ -406,13 +482,13 @@ def main():
     print("=" * 50)
 
     if run_data:
-        miles = sum(r["distance_miles"] for r in run_data)
+        miles = sum(float(r["distance_miles"]) for r in run_data)
         dates = [r["date"] for r in run_data]
         print(f"\nRunning:  {len(run_data)} runs, {miles:,.1f} miles")
         print(f"  Range:  {min(dates)} to {max(dates)}")
 
     if soccer_data:
-        miles = sum(r["distance_miles"] for r in soccer_data)
+        miles = sum(float(r["distance_miles"]) for r in soccer_data)
         dates = [r["date"] for r in soccer_data]
         print(f"\nSoccer:   {len(soccer_data)} activities, {miles:,.1f} miles")
         print(f"  Range:  {min(dates)} to {max(dates)}")

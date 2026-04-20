@@ -1,5 +1,5 @@
 ---
-title: "Running Progress"
+title: "Stravalytics"
 date: now
 date-format: "MMMM D, YYYY h:mm A"
 format:
@@ -8,6 +8,7 @@ format:
     self-contained: true
     toc: false
     page-layout: full
+jupyter: stravalytics
 ---
 
 ```{python}

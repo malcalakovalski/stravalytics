@@ -19,10 +19,11 @@ Strava API credentials come from https://www.strava.com/settings/api. First run 
 ## Running
 
 ```bash
-python strava_export.py
+python strava_export.py         # Incremental: only fetches activities since last export
+python strava_export.py --full  # Full refresh: re-fetches all-time activities
 ```
 
-No CLI arguments. Fetches all-time activities. Rate-limit aware (proactive pause at 90/100 15-min quota, retry on 429).
+Incremental by default. Reads existing CSVs to find the latest activity date, fetches only newer activities, and merges (dedup by activity_id). Stream files are cached by filename. Rate-limit aware (proactive pause at 90/100 15-min quota, retry on 429).
 
 ## Output
 
@@ -36,7 +37,8 @@ Single-file design. Key sections in `strava_export.py`:
 - **OAuth2** (lines ~44-123): Local HTTP server callback for auth code flow, token refresh with file persistence
 - **API client** (lines ~128-177): Rate-limit-aware GET wrapper, paginated activity fetcher
 - **Row formatters** (lines ~210-280): Transform Strava JSON → flat dicts for runs (with HR zone distribution), soccer (with calories from detail endpoint), and per-second streams
-- **Main** (lines ~301-425): Orchestrates fetch → filter → format → write pipeline
+- **Incremental helpers** (lines ~299-327): `_latest_activity_ts` scans CSVs for newest date, `_read_csv_rows` loads existing data for merge
+- **Main** (lines ~333-501): Orchestrates fetch → filter → merge → write pipeline
 
 ## Sensitive Files
 
