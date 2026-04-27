@@ -1,4 +1,5 @@
 date,name,distance_miles,duration,duration_seconds,avg_pace_per_mile,avg_heartrate,max_heartrate,elevation_gain_ft,hr_zone_1_sec,hr_zone_2_sec,hr_zone_3_sec,hr_zone_4_sec,hr_zone_5_sec,activity_id
+2026-04-26 14:39,Regent’s Park Run,3.21,44:27,2667,13:49,150.4,168.0,91.9,331.0,2300.0,32.0,0.0,0.0,18267118891
 2026-04-24 16:27,Hyde Park Run,3.04,42:06,2526,13:51,148.4,171.0,121.4,417.0,2013.0,98.0,0.0,0.0,18240778966
 2026-04-21 15:17,Afternoon Run,3.61,53:16,3196,14:46,150.4,172.0,131.2,581.0,2378.0,237.0,0.0,0.0,18203268471
 2026-04-20 10:28,Morning Run,2.38,36:32,2192,15:22,141.2,167.0,98.4,540.0,1642.0,1.0,0.0,0.0,18185095465
