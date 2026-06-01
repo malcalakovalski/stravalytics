@@ -217,7 +217,10 @@ ef_monthly = ef_runs.groupby("month")["ef"].mean()
 # ── Month Streak ─────────────────────────────────────────────────
 
 streak = 0
+current_period = pd.Timestamp.now().to_period("M")
 for m in reversed(all_months):
+    if m == current_period:
+        continue  # skip partial current month
     if run_monthly.get(m, 0) >= MIN_MONTHLY_MILES:
         streak += 1
     else:
