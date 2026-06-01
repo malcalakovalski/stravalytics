@@ -34,6 +34,7 @@ ROLLING_SHORT = 30         # Short rolling window (days)
 ROLLING_LONG = 90          # Long rolling window (days)
 REFERENCE_PACE = 14.0          # Reference pace for HR tracking (min/mi) — update as fitness improves
 REFERENCE_PACE_BAND = 0.5      # ± band around reference pace (min)
+RUNNA_START = pd.Timestamp("2026-03-01")  # Runna training plan start
 
 # 10K readiness scorecard thresholds
 MILEAGE_GREEN = 30         # 30-day mileage green threshold
@@ -356,6 +357,46 @@ if not z2_df.empty:
     recent_z2 = z2_df.sort_values("date", ascending=False).head(3)["z2_pace"].mean()
 else:
     recent_z2 = np.nan
+
+# ── Runna Training (March 2026+) ────────────────────────────────
+
+runna_runs = runs[runs["date"] >= RUNNA_START].copy().sort_values("date")
+march_stream_files = sorted([
+    f for f in stream_files if pd.Timestamp(f.stem[:10]) >= RUNNA_START
+])
+
+split_records = []
+for f in march_stream_files:
+    parts = f.stem.split("-")
+    run_date = pd.Timestamp(f"{parts[0]}-{parts[1]}-{parts[2]}")
+
+    sdf = pd.read_csv(f)
+    sdf["distance_miles"] = pd.to_numeric(sdf["distance_miles"], errors="coerce")
+
+    max_dist = sdf["distance_miles"].max()
+    if pd.isna(max_dist) or max_dist < 1:
+        continue
+
+    for mile in range(1, int(max_dist) + 1):
+        start_rows = sdf[sdf["distance_miles"] >= mile - 1]
+        end_rows = sdf[sdf["distance_miles"] >= mile]
+        if start_rows.empty or end_rows.empty:
+            continue
+
+        t_start = start_rows.iloc[0]["elapsed_seconds"]
+        t_end = end_rows.iloc[0]["elapsed_seconds"]
+        split_seconds = t_end - t_start
+
+        if split_seconds > 0:
+            split_records.append({
+                "date": run_date,
+                "mile": mile,
+                "split_pace": split_seconds / 60,
+            })
+
+splits_df = pd.DataFrame(split_records) if split_records else pd.DataFrame(
+    columns=["date", "mile", "split_pace"]
+)
 ```
 
 ```{python}
@@ -387,6 +428,117 @@ display(HTML(
     f'<div style="{value}">{streak} mo</div></div>'
     f'</div>'
 ))
+```
+
+## Training Progress (Runna)
+
+```{python}
+#| echo: false
+
+fig = go.Figure()
+
+if not runna_runs.empty:
+    fig.add_trace(go.Scatter(
+        x=runna_runs["date"], y=runna_runs["pace_numeric"],
+        mode="markers", showlegend=False,
+        marker=dict(
+            size=runna_runs["distance_miles"] * 4,
+            color=runna_runs["distance_miles"],
+            colorscale="Viridis",
+            colorbar=dict(title="Miles", len=0.6, thickness=12),
+            opacity=0.8,
+            line=dict(width=0.5, color="white"),
+        ),
+        text=[f"{d:.1f} mi, {format_pace(p)}/mi" for d, p in
+              zip(runna_runs["distance_miles"], runna_runs["pace_numeric"])],
+        hovertemplate="%{x|%b %d}<br>%{text}<extra></extra>",
+    ))
+
+    if len(runna_runs.dropna(subset=["pace_numeric"])) >= 3:
+        valid = runna_runs.dropna(subset=["pace_numeric"])
+        x_num = valid["date"].astype("int64") / 1e18
+        z = np.polyfit(x_num, valid["pace_numeric"], 1)
+        fig.add_trace(go.Scatter(
+            x=valid["date"], y=np.poly1d(z)(x_num),
+            mode="lines", name="Pace trend",
+            line=dict(color="#4dabf7", width=2, dash="dash"),
+        ))
+
+fig.update_layout(**chart_layout(
+    height=500,
+    yaxis=dict(
+        title="Pace (min/mi)", autorange="reversed",
+        gridcolor=GRID_COLOR,
+    ),
+    xaxis=dict(gridcolor=GRID_COLOR),
+    hovermode="closest",
+    annotations=[dict(
+        text="Faster is up. Bubble size = distance. Training started March 2026 with Runna.",
+        xref="paper", yref="paper", x=0, y=-0.08,
+        showarrow=False, font=dict(size=12, color="rgba(255,255,255,0.4)"),
+    )],
+))
+fig.show()
+```
+
+## Mile Splits
+
+```{python}
+#| echo: false
+
+fig = go.Figure()
+
+if not splits_df.empty:
+    pivot = splits_df.pivot_table(index="date", columns="mile", values="split_pace")
+    pivot = pivot.sort_index()
+
+    date_labels = [d.strftime("%b %d") for d in pivot.index]
+    mile_labels = [f"Mile {int(m)}" for m in pivot.columns]
+
+    hover_text = []
+    for date_val in pivot.index:
+        row_text = []
+        for mile_col in pivot.columns:
+            val = pivot.loc[date_val, mile_col]
+            if pd.notna(val):
+                row_text.append(f"{date_val.strftime('%b %d')}, Mile {int(mile_col)}: {format_pace(val)}/mi")
+            else:
+                row_text.append("")
+        hover_text.append(row_text)
+
+    pace_lo = splits_df["split_pace"].quantile(0.05)
+    pace_hi = splits_df["split_pace"].quantile(0.95)
+    tick_vals = list(range(int(pace_lo), int(pace_hi) + 2))
+
+    fig.add_trace(go.Heatmap(
+        z=pivot.values,
+        x=mile_labels,
+        y=date_labels,
+        text=hover_text,
+        hovertemplate="%{text}<extra></extra>",
+        colorscale=[[0, "#00d4aa"], [0.5, "#ffc107"], [1, "#dc3545"]],
+        zmin=pace_lo,
+        zmax=pace_hi,
+        colorbar=dict(
+            title="min/mi", len=0.6, thickness=12,
+            tickvals=tick_vals,
+            ticktext=[f"{v}:00" for v in tick_vals],
+        ),
+        xgap=3, ygap=2,
+    ))
+
+fig.update_layout(**chart_layout(
+    height=max(450, len(pivot) * 20),
+    xaxis=dict(side="top", showgrid=False),
+    yaxis=dict(showgrid=False),
+    hovermode="closest",
+    annotations=[dict(
+        text="Green = faster. Red = slower. Even colors across a row = consistent pacing.",
+        xref="paper", yref="paper", x=0.5, y=-0.05,
+        showarrow=False, font=dict(size=12, color="rgba(255,255,255,0.4)"),
+    )],
+))
+fig.show()
 ```
 
 ## Zone 2 Pace Efficiency
