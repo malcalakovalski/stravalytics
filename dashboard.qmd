@@ -114,15 +114,18 @@ runs = pd.read_csv(DATA_DIR / "strava-runs-summary.csv")
 runs["date"] = pd.to_datetime(runs["date"])
 runs["pace_numeric"] = runs["avg_pace_per_mile"].apply(parse_pace)
 runs["month"] = runs["date"].dt.to_period("M")
+runs = runs[runs["date"] >= RUNNA_START].reset_index(drop=True)
 
 soccer = pd.read_csv(DATA_DIR / "strava-soccer-summary.csv")
 soccer["date"] = pd.to_datetime(soccer["date"])
 soccer["month"] = soccer["date"].dt.to_period("M")
+soccer = soccer[soccer["date"] >= RUNNA_START].reset_index(drop=True)
 
 # ── Zone 2 Pace Calculation ─────────────────────────────────────
 
 z2_records = []
 stream_files = sorted(STREAMS_DIR.glob("*.csv")) if STREAMS_DIR.exists() else []
+stream_files = [f for f in stream_files if pd.Timestamp(f.stem[:10]) >= RUNNA_START]
 stream_activity_ids = set()
 
 for f in stream_files:
@@ -358,15 +361,10 @@ if not z2_df.empty:
 else:
     recent_z2 = np.nan
 
-# ── Runna Training (March 2026+) ────────────────────────────────
-
-runna_runs = runs[runs["date"] >= RUNNA_START].copy().sort_values("date")
-march_stream_files = sorted([
-    f for f in stream_files if pd.Timestamp(f.stem[:10]) >= RUNNA_START
-])
+# ── Mile Splits ─────────────────────────────────────────────────
 
 split_records = []
-for f in march_stream_files:
+for f in stream_files:
     parts = f.stem.split("-")
     run_date = pd.Timestamp(f"{parts[0]}-{parts[1]}-{parts[2]}")
 
@@ -430,36 +428,37 @@ display(HTML(
 ))
 ```
 
-## Training Progress (Runna)
+## Training Progress
 
 ```{python}
 #| echo: false
 
 fig = go.Figure()
 
-if not runna_runs.empty:
+if not runs.empty:
     fig.add_trace(go.Scatter(
-        x=runna_runs["date"], y=runna_runs["pace_numeric"],
+        x=runs["date"], y=runs["pace_numeric"],
         mode="markers", showlegend=False,
         marker=dict(
-            size=runna_runs["distance_miles"] * 4,
-            color=runna_runs["distance_miles"],
+            size=runs["distance_miles"] * 4,
+            color=runs["distance_miles"],
             colorscale="Viridis",
             colorbar=dict(title="Miles", len=0.6, thickness=12),
             opacity=0.8,
             line=dict(width=0.5, color="white"),
         ),
         text=[f"{d:.1f} mi, {format_pace(p)}/mi" for d, p in
-              zip(runna_runs["distance_miles"], runna_runs["pace_numeric"])],
+              zip(runs["distance_miles"], runs["pace_numeric"])],
         hovertemplate="%{x|%b %d}<br>%{text}<extra></extra>",
     ))
 
-    if len(runna_runs.dropna(subset=["pace_numeric"])) >= 3:
-        valid = runna_runs.dropna(subset=["pace_numeric"])
+    valid = runs.dropna(subset=["pace_numeric"])
+    if len(valid) >= 3:
         x_num = valid["date"].astype("int64") / 1e18
         z = np.polyfit(x_num, valid["pace_numeric"], 1)
+        order = x_num.argsort()
         fig.add_trace(go.Scatter(
-            x=valid["date"], y=np.poly1d(z)(x_num),
+            x=valid["date"].iloc[order], y=np.poly1d(z)(x_num.iloc[order]),
             mode="lines", name="Pace trend",
             line=dict(color="#4dabf7", width=2, dash="dash"),
         ))
