@@ -32,8 +32,8 @@ MIN_MONTHLY_MILES = 25     # Minimum effective training month
 TARGET_MONTHLY_MILES = 50  # Target monthly mileage
 ROLLING_SHORT = 30         # Short rolling window (days)
 ROLLING_LONG = 90          # Long rolling window (days)
-REFERENCE_PACE = 14.0          # Reference pace for HR tracking (min/mi) — update as fitness improves
-REFERENCE_PACE_BAND = 0.5      # ± band around reference pace (min)
+REFERENCE_PACE = 12.75         # Reference pace for HR tracking (min/mi) — update as fitness improves
+REFERENCE_PACE_BAND = 0.25     # ± band around reference pace (min)
 RUNNA_START = pd.Timestamp("2026-03-01")  # Runna training plan start
 
 # 10K readiness scorecard thresholds
