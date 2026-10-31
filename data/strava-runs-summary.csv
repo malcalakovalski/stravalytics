@@ -1,4 +1,5 @@
 date,name,distance_miles,duration,duration_seconds,avg_pace_per_mile,avg_heartrate,max_heartrate,elevation_gain_ft,hr_zone_1_sec,hr_zone_2_sec,hr_zone_3_sec,hr_zone_4_sec,hr_zone_5_sec,activity_id
+2026-10-31 08:42,Hot Cider Hustle 10k,6.29,54:50,3290,8:43,176.2,200.0,275.6,24.0,417.0,1906.0,940.0,3.0,20804798251
 2026-10-29 16:54,Afternoon Run,3.77,44:37,2677,11:49,141.0,153.0,16.4,232.0,2445.0,0.0,0.0,0.0,20784050143
 2026-10-26 11:58,Lunch Run,4.0,41:50,2510,10:26,147.4,167.0,19.7,197.0,2302.0,10.0,0.0,0.0,20739433660
 2026-10-25 15:11,Afternoon Run,5.22,1:01:08,3668,11:43,137.9,152.0,101.7,785.0,2881.0,0.0,0.0,0.0,20730668703
