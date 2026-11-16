@@ -1,4 +1,5 @@
 date,name,distance_miles,duration,duration_seconds,avg_pace_per_mile,avg_heartrate,max_heartrate,elevation_gain_ft,hr_zone_1_sec,hr_zone_2_sec,hr_zone_3_sec,hr_zone_4_sec,hr_zone_5_sec,activity_id
+2026-11-16 11:49,Lunch Run,4.5,55:55,3355,12:25,138.2,157.0,88.6,790.0,2565.0,0.0,0.0,0.0,21011371522
 2026-11-13 16:07,Afternoon Run,5.2,58:30,3510,11:15,144.4,169.0,95.1,653.0,2785.0,59.0,0.0,0.0,20978349870
 2026-11-11 15:12,Afternoon Run,3.5,41:12,2472,11:45,140.8,155.0,95.1,424.0,2047.0,0.0,0.0,0.0,20953893447
 2026-11-09 16:04,Afternoon Run,3.5,41:53,2513,11:56,144.0,166.0,134.5,377.0,2136.0,0.0,0.0,0.0,20925695994
